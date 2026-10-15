@@ -1,0 +1,53 @@
+name: 做 IG 影片
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: render
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: 拿現有的影片（gh-pages）
+        run: |
+          git fetch origin gh-pages --depth=1 || true
+          mkdir -p site
+          if git rev-parse --verify origin/gh-pages >/dev/null 2>&1; then
+            git --work-tree=site checkout origin/gh-pages -- . && git reset -q
+          fi
+      - name: 看看有沒有要做的影片
+        id: check
+        run: |
+          N=$(curl -sL "$(node -p "require('./config.json').API_URL")?action=videojobs" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s).jobs||[];const fs=require('fs');console.log(j.filter(x=>(x.slides||[]).slice(0,10).some((_,i)=>!fs.existsSync('site/v/'+x.id+'-'+i+'.mp4'))).length)}catch(e){console.log(0)}})")
+          echo "n=$N" >> $GITHUB_OUTPUT
+          echo "待製作：$N"
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.n != '0'
+        with:
+          node-version: 20
+          cache: npm
+      - name: 安裝中文字型
+        if: steps.check.outputs.n != '0'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
+      - name: 安裝
+        if: steps.check.outputs.n != '0'
+        run: npm ci
+      - name: 做影片
+        if: steps.check.outputs.n != '0'
+        run: node render.mjs
+      - name: 放上 GitHub Pages
+        if: steps.check.outputs.n != '0'
+        run: |
+          cd site
+          git init -q -b gh-pages
+          git config user.name "19bot"
+          git config user.email "19bot@users.noreply.github.com"
+          git add -A
+          git commit -qm "videos $(date -u +%F_%H%M)"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" gh-pages
