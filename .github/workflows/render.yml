@@ -24,7 +24,7 @@ jobs:
       - name: 看看有沒有要做的影片
         id: check
         run: |
-          N=$(curl -sL "$(node -p "require('./config.json').API_URL")?action=videojobs" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s).jobs||[];const fs=require('fs');console.log(j.filter(x=>(x.slides||[]).slice(0,10).some((_,i)=>!fs.existsSync('site/v/'+x.id+'-'+i+'.mp4'))).length)}catch(e){console.log(0)}})")
+          N=$(curl -sL "$(node -p "require('./config.json').API_URL")?action=videojobs" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s).jobs||[];const fs=require('fs');console.log(j.filter(x=>{const n=x.kind==='set'?Math.min(10,(x.slides||[]).length+2):Math.min(10,(x.slides||[]).length);return Array.from({length:n}).some((_,i)=>!fs.existsSync('site/v/'+x.id+'-'+i+'.mp4'))}).length)}catch(e){console.log(0)}})")
           echo "n=$N" >> $GITHUB_OUTPUT
           echo "待製作：$N"
       - uses: actions/setup-node@v4
@@ -35,9 +35,22 @@ jobs:
       - name: 安裝中文字型
         if: steps.check.outputs.n != '0'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.n != '0'
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: 去背模型快取
+        if: steps.check.outputs.n != '0'
+        uses: actions/cache@v4
+        with:
+          path: ~/.rembg
+          key: rembg-u2net-v1
       - name: 安裝
         if: steps.check.outputs.n != '0'
-        run: npm ci
+        run: |
+          npm ci
+          pip install -q -r requirements.txt
       - name: 做影片
         if: steps.check.outputs.n != '0'
         run: node render.mjs
