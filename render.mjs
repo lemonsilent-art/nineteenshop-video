@@ -134,6 +134,17 @@ async function renderSet(j, serveUrl, prep) {
     await renderStill({ composition, serveUrl, output: path.join(VDIR, `${j.id}-${i}.jpg`), inputProps: c.props, frame: c.id === 'Thanks' ? 50 : 70, imageFormat: 'jpeg', jpegQuality: 88, browserExecutable: process.env.BROWSER || null });
     fs.renameSync(out + '.tmp.mp4', out);
   }
+  // FB 用：整組小影片接成一部完整影片 v/<編號>-full.mp4（FB 不能左右滑影片）
+  const full = path.join(VDIR, `${j.id}-full.mp4`);
+  if (!fs.existsSync(full)) {
+    const list = path.join(VDIR, `${j.id}-list.txt`);
+    fs.writeFileSync(list, clips.map((_, i) => `file '${clipPath(j.id, i)}'`).join('\n'));
+    const args = ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', full + '.tmp.mp4'];
+    try { execFileSync('ffmpeg', args, { stdio: 'inherit' }); }
+    catch (e) { try { execFileSync('npx', ['remotion', 'ffmpeg', ...args], { stdio: 'inherit' }); } catch (e2) { console.error('⚠️ 完整影片接不起來', e2.message); } }
+    if (fs.existsSync(full + '.tmp.mp4')) fs.renameSync(full + '.tmp.mp4', full);
+    try { fs.unlinkSync(list); } catch (e) {}
+  }
   // 預覽頁（19號小幫手的「▶️ 看輪播」）
   const vids = clips.map((_, i) => `<div class="c"><video src="${j.id}-${i}.mp4" poster="${j.id}-${i}.jpg" controls muted loop playsinline preload="none"></video><p>${i + 1}/${clips.length}</p></div>`).join('');
   fs.writeFileSync(path.join(VDIR, j.id + '.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>19號舖子 輪播預覽</title><style>body{margin:0;background:#FDF1EC;font-family:sans-serif}h1{font-size:18px;padding:12px 16px;margin:0;color:#4A3530}.r{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 16px 16px}.c{flex:0 0 82%;scroll-snap-align:center}video{width:100%;border-radius:16px;background:#fff;aspect-ratio:3/4}p{text-align:center;color:#8A7268;margin:4px}pre{white-space:pre-wrap;padding:0 16px 32px;color:#4A3530;font-size:15px}</style><h1>${(j.title || '') + ' ' + (j.title2 || '')}（左右滑）</h1><div class="r">${vids}</div><pre>${String(j.caption || '').replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</pre>`);
