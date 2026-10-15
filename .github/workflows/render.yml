@@ -42,8 +42,10 @@ jobs:
         if: steps.check.outputs.n != '0'
         run: node render.mjs
       - name: 放上 GitHub Pages
-        if: steps.check.outputs.n != '0'
+        if: steps.check.outputs.n != '0' || github.event_name == 'workflow_dispatch'
         run: |
+          mkdir -p site && touch site/.nojekyll
+          [ -f site/index.html ] || echo '<meta charset="utf-8"><p>19號舖子 IG 影片暫存區</p>' > site/index.html
           cd site
           git init -q -b gh-pages
           git config user.name "19bot"
