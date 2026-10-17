@@ -34,7 +34,8 @@ if (jobs.length) {
   const pub = path.resolve('public', 'jobs');
   fs.mkdirSync(pub, { recursive: true });
   // 先把照片下載下來（避免做影片時讀不到雲端圖片）
-  for (const j of jobs.filter((x) => x.kind !== 'set')) {
+  const OLD = (x) => !['set', 'single', 'live'].includes(x.kind);
+  for (const j of jobs.filter(OLD)) {
     for (let i = 0; i < j.slides.length; i++) {
       const s = j.slides[i];
       try {
@@ -51,14 +52,22 @@ if (jobs.length) {
   for (const j of jobs.filter((x) => x.kind === 'set')) {
     try { j._prep = await prepareSet(j, pub); } catch (e) { console.log('❌ 準備失敗', j.id, e.message); }
   }
+  // v8：單品輪播、連線合輯
+  for (const j of jobs.filter((x) => x.kind === 'single' || x.kind === 'live')) {
+    try { j._clips = j.kind === 'single' ? await prepareSingle(j, pub) : await prepareLive(j, pub); } catch (e) { console.log('❌ 準備失敗', j.id, e.message); }
+  }
   const serveUrl = await bundle({ entryPoint: path.resolve('src/index.js') });
   // v7：一天的新品輪播（封面＋商品頁＋感謝卡）
   for (const j of jobs.filter((x) => x.kind === 'set' && x._prep)) {
     try { await renderSet(j, serveUrl, j._prep); idx[j.id] = Date.now(); console.log('✅ 做好了', j.id, clipCount(j) + ' 支'); }
     catch (e) { console.log('❌ 失敗', j.id, e.message); }
   }
+  for (const j of jobs.filter((x) => (x.kind === 'single' || x.kind === 'live') && x._clips)) {
+    try { await renderClips(j, serveUrl, j._clips); idx[j.id] = Date.now(); console.log('✅ 做好了', j.id, j._clips.length + ' 支'); }
+    catch (e) { console.log('❌ 失敗', j.id, e.message); }
+  }
   // IG 輪播：一張照片做一支 3 秒影片 → v/<編號>-<第幾張>.mp4
-  for (const j of jobs.filter((x) => x.kind !== 'set')) {
+  for (const j of jobs.filter(OLD)) {
     const slides = j.slides.slice(0, 10), n = slides.length;
     let ok = true;
     for (let i = 0; i < n; i++) {
@@ -125,13 +134,16 @@ async function renderSet(j, serveUrl, prep) {
   const clips = [{ id: 'Cover', props: { img: cover, title: j.title, title2: j.title2 || '本日新品', sub: j.sub || '', variant: j.variant || 0 } }]
     .concat(slides.map((s, i) => ({ id: 'Item', props: { ...s, i: i + 1, n, side: i % 2 } })))
     .concat([{ id: 'Thanks', props: { img: thanks } }]);
+  return renderClips(j, serveUrl, clips);
+}
+async function renderClips(j, serveUrl, clips) {
   for (let i = 0; i < clips.length; i++) {
     const out = clipPath(j.id, i);
     if (fs.existsSync(out)) continue;
     const c = clips[i];
     const composition = await selectComposition({ serveUrl, id: c.id, inputProps: c.props, browserExecutable: process.env.BROWSER || null });
     await renderMedia({ composition, serveUrl, codec: 'h264', outputLocation: out + '.tmp.mp4', inputProps: c.props, concurrency: 2, crf: 20, pixelFormat: 'yuv420p', enforceAudioTrack: true, browserExecutable: process.env.BROWSER || null });
-    await renderStill({ composition, serveUrl, output: path.join(VDIR, `${j.id}-${i}.jpg`), inputProps: c.props, frame: c.id === 'Thanks' ? 50 : 70, imageFormat: 'jpeg', jpegQuality: 88, browserExecutable: process.env.BROWSER || null });
+    await renderStill({ composition, serveUrl, output: path.join(VDIR, `${j.id}-${i}.jpg`), inputProps: c.props, frame: c.id === 'Thanks' ? 50 : c.id === 'LiveGrid' ? 110 : 80, imageFormat: 'jpeg', jpegQuality: 88, browserExecutable: process.env.BROWSER || null });
     fs.renameSync(out + '.tmp.mp4', out);
   }
   // FB 用：整組小影片接成一部完整影片 v/<編號>-full.mp4（FB 不能左右滑影片）
@@ -148,4 +160,51 @@ async function renderSet(j, serveUrl, prep) {
   // 預覽頁（19號小幫手的「▶️ 看輪播」）
   const vids = clips.map((_, i) => `<div class="c"><video src="${j.id}-${i}.mp4" poster="${j.id}-${i}.jpg" controls muted loop playsinline preload="none"></video><p>${i + 1}/${clips.length}</p></div>`).join('');
   fs.writeFileSync(path.join(VDIR, j.id + '.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>19號舖子 輪播預覽</title><style>body{margin:0;background:#FDF1EC;font-family:sans-serif}h1{font-size:18px;padding:12px 16px;margin:0;color:#4A3530}.r{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 16px 16px}.c{flex:0 0 82%;scroll-snap-align:center}video{width:100%;border-radius:16px;background:#fff;aspect-ratio:3/4}p{text-align:center;color:#8A7268;margin:4px}pre{white-space:pre-wrap;padding:0 16px 32px;color:#4A3530;font-size:15px}</style><h1>${(j.title || '') + ' ' + (j.title2 || '')}（左右滑）</h1><div class="r">${vids}</div><pre>${String(j.caption || '').replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</pre>`);
+}
+
+/* ---------- v8：單品輪播（封面 C：場景＋人物去背＋商品貼紙；後面每張照片滿版 A） ---------- */
+function palette(file) {
+  try { return JSON.parse(execFileSync('python3', ['palette.py', file], { encoding: 'utf8', timeout: 60e3 }).trim() || '{}'); } catch (e) { return {}; }
+}
+async function prepareSingle(j, pub) {
+  const local = async (url, name) => {
+    if (!url) return 'logo.png';
+    const f = `${j.id}-${name}.jpg`;
+    try { await download(url, path.join(pub, f)); return 'jobs/' + f; } catch (e) { console.log('圖片下載失敗', name, e.message); return 'logo.png'; }
+  };
+  const slides = (j.slides || []).slice(0, 10);
+  for (let i = 0; i < slides.length; i++) slides[i].local = await local(slides[i].img, 'a' + i);
+  const person = await local(j.person, 'person');
+  const prod = await local(j.cutSrc || (slides[1] || slides[0] || {}).img, 'prod');
+  const cutP = `jobs/${j.id}-person-cut.png`, cutG = `jobs/${j.id}-prod-cut.png`;
+  const okSet = {};
+  try {
+    const out = execFileSync('python3', ['cutout.py', path.join('public', person), path.join('public', cutP), path.join('public', prod), path.join('public', cutG)], { encoding: 'utf8', timeout: 15 * 60e3 });
+    out.split('\n').filter(Boolean).forEach((l) => { try { const o = JSON.parse(l); if (o.ok) okSet[o.out] = 1; } catch (e) {} });
+  } catch (e) { console.log('去背失敗', e.message); }
+  const personCut = okSet[path.join('public', cutP)] ? cutP : person;
+  const prodCut = okSet[path.join('public', cutG)] ? cutG : prod;
+  const pal = okSet[path.join('public', cutG)] ? palette(path.join('public', cutG)) : {};
+  const h1 = pal.h1 != null ? pal.h1 : (j.h1 != null ? j.h1 : 340), h2 = pal.h2 != null ? pal.h2 : j.h2;
+  const tag = j.tag || '';
+  const n = slides.length;
+  return slides.map((s, i) => i === 0
+    ? { id: 'CoverC', props: { scene: s.local, person: personCut, cut: prodCut, title: s.title || '', sub: s.sub || '', tag, h1, h2 } }
+    : { id: 'SlideA', props: { img: s.local, mode: s.mode || 'point', title: s.title || '', sub: s.sub || '', point: s.point || i, i, n, tag, h1, h2, cut: s.mode === 'cta' ? prodCut : undefined } });
+}
+/* ---------- v8：連線合輯（每個國家：大圖一頁＋九宮格） ---------- */
+async function prepareLive(j, pub) {
+  const clips = [];
+  const slides = (j.slides || []).slice(0, 10);
+  for (let i = 0; i < slides.length; i++) {
+    const s = slides[i];
+    const get = async (url, name) => { if (!url) return 'logo.png'; const f = `${j.id}-${name}.jpg`; try { await download(url, path.join(pub, f)); return 'jobs/' + f; } catch (e) { return 'logo.png'; } };
+    if (s.type === 'hero') clips.push({ id: 'LiveHero', props: { img: await get(s.img, 'h' + i), name: s.name || '', country: s.country || '', flag: s.flag || '', city: s.city || '', close: s.close || '', h1: s.h1, h2: s.h2 } });
+    else {
+      const items = [];
+      for (let k = 0; k < Math.min(9, (s.items || []).length); k++) items.push({ img: await get(s.items[k].img, `g${i}-${k}`), name: s.items[k].name || '' });
+      clips.push({ id: 'LiveGrid', props: { items, country: s.country || '', flag: s.flag || '', page: s.page || 1, pages: s.pages || 1, start: s.start || 1, close: s.close || '', h1: s.h1, h2: s.h2 } });
+    }
+  }
+  return clips;
 }
