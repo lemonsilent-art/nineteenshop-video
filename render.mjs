@@ -136,30 +136,56 @@ async function renderSet(j, serveUrl, prep) {
     .concat([{ id: 'Thanks', props: { img: thanks } }]);
   return renderClips(j, serveUrl, clips);
 }
+/* v9：IG 輪播只收 4:5～16:9 → 每支小影片轉成 1080×1350（左右用模糊底補滿）＋背景音樂；
+   FB／IG Reels 完整版做成 9:16（1080×1920，上下模糊底），限動不會切到字 */
+const BGMS = (() => { try { return fs.readdirSync(path.resolve('public', 'bgm')).filter((f) => /\.(mp3|m4a)$/i.test(f)).sort().map((f) => path.resolve('public', 'bgm', f)); } catch (e) { return []; } })();   // 免版權配樂放 public/bgm（沒有就無聲；IG Reels 另外掛 IG 熱門音樂）
+const bgmFor = (id) => BGMS.length ? BGMS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % BGMS.length] : null;
+const ff = (args) => { try { execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }); } catch (e) { execFileSync('npx', ['remotion', 'ffmpeg', '-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }); } };
+const dur = (f) => { try { return parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f], { encoding: 'utf8' })) || 0; } catch (e) { return 0; } };
+function frameIt(src, out, W, H, fgW, fgH, bgm, at, len, fadeIn, fgY) {
+  const vf = `[0:v]split[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=40:2,eq=brightness=-0.04:saturation=1.1[bg];` +
+    `[b]scale=${fgW}:${fgH}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:${fgY == null ? '(H-h)/2' : fgY},setsar=1,format=yuv420p[v]`;
+  const a = bgm && len > 0;
+  const args = ['-i', src];
+  if (a) args.push('-stream_loop', '-1', '-ss', String(at.toFixed(3)), '-i', bgm);
+  else args.push('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo');   // 沒配樂也放無聲音軌（IG／FB 比較不會拒收）
+  args.push('-filter_complex', vf + (a ? `;[1:a]atrim=0:${len.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:d=${fadeIn},afade=t=out:st=${Math.max(0, len - 0.5).toFixed(3)}:d=0.5,volume=0.85[au]` : ''),
+    '-map', '[v]', '-map', a ? '[au]' : '1:a', '-c:a', 'aac', '-b:a', '160k', '-ar', '44100',
+    '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', '30', '-movflags', '+faststart', '-t', (len > 0 ? len : dur(src) || 60).toFixed(3), out);
+  ff(args);
+}
 async function renderClips(j, serveUrl, clips) {
+  const bgm = bgmFor(j.id);
+  let at = 0;
   for (let i = 0; i < clips.length; i++) {
-    const out = clipPath(j.id, i);
-    if (fs.existsSync(out)) continue;
+    const out = clipPath(j.id, i), raw = out.replace(/\.mp4$/, '.raw.mp4');
+    if (fs.existsSync(out)) { at += dur(out); continue; }
     const c = clips[i];
     const composition = await selectComposition({ serveUrl, id: c.id, inputProps: c.props, browserExecutable: process.env.BROWSER || null });
-    await renderMedia({ composition, serveUrl, codec: 'h264', outputLocation: out + '.tmp.mp4', inputProps: c.props, concurrency: 2, crf: 20, pixelFormat: 'yuv420p', enforceAudioTrack: true, browserExecutable: process.env.BROWSER || null });
+    if (!fs.existsSync(raw)) await renderMedia({ composition, serveUrl, codec: 'h264', outputLocation: raw, inputProps: c.props, concurrency: 2, crf: 18, pixelFormat: 'yuv420p', enforceAudioTrack: true, browserExecutable: process.env.BROWSER || null });
     await renderStill({ composition, serveUrl, output: path.join(VDIR, `${j.id}-${i}.jpg`), inputProps: c.props, frame: c.id === 'Thanks' ? 50 : c.id === 'LiveGrid' ? 110 : 80, imageFormat: 'jpeg', jpegQuality: 88, browserExecutable: process.env.BROWSER || null });
+    const len = dur(raw);
+    frameIt(raw, out + '.tmp.mp4', 1080, 1350, 1080, 1350, bgm, at, len, i === 0 ? 0.3 : 0.12);
     fs.renameSync(out + '.tmp.mp4', out);
+    at += len;
   }
-  // FB 用：整組小影片接成一部完整影片 v/<編號>-full.mp4（FB 不能左右滑影片）
+  // FB 用：整組接成一部完整影片 v/<編號>-full.mp4（9:16，上下模糊底，連續音樂）
   const full = path.join(VDIR, `${j.id}-full.mp4`);
   if (!fs.existsSync(full)) {
-    const list = path.join(VDIR, `${j.id}-list.txt`);
-    fs.writeFileSync(list, clips.map((_, i) => `file '${clipPath(j.id, i)}'`).join('\n'));
-    const args = ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', full + '.tmp.mp4'];
-    try { execFileSync('ffmpeg', args, { stdio: 'inherit' }); }
-    catch (e) { try { execFileSync('npx', ['remotion', 'ffmpeg', ...args], { stdio: 'inherit' }); } catch (e2) { console.error('⚠️ 完整影片接不起來', e2.message); } }
-    if (fs.existsSync(full + '.tmp.mp4')) fs.renameSync(full + '.tmp.mp4', full);
-    try { fs.unlinkSync(list); } catch (e) {}
+    const list = path.join(VDIR, `${j.id}-list.txt`), cat = path.join(VDIR, `${j.id}-cat.mp4`);
+    const parts = clips.map((_, i) => { const raw = clipPath(j.id, i).replace(/\.mp4$/, '.raw.mp4'); return fs.existsSync(raw) ? raw : clipPath(j.id, i); });
+    fs.writeFileSync(list, parts.map((f) => `file '${f}'`).join('\n'));
+    try {
+      ff(['-f', 'concat', '-safe', '0', '-i', list, '-map', '0:v', '-c', 'copy', cat]);
+      frameIt(cat, full + '.tmp.mp4', 1080, 1920, 1000, 1400, bgm, 0, dur(cat), 0.3, 230);   // 偏上放：避開 Reels／限動下方的文字和按鈕
+      if (fs.existsSync(full + '.tmp.mp4')) fs.renameSync(full + '.tmp.mp4', full);
+    } catch (e) { console.error('⚠️ 完整影片接不起來', e.message); }
+    for (const f of [list, cat]) try { fs.unlinkSync(f); } catch (e) {}
   }
+  if (fs.existsSync(full)) for (let i = 0; i < clips.length; i++) try { fs.unlinkSync(clipPath(j.id, i).replace(/\.mp4$/, '.raw.mp4')); } catch (e) {}
   // 預覽頁（19號小幫手的「▶️ 看輪播」）
-  const vids = clips.map((_, i) => `<div class="c"><video src="${j.id}-${i}.mp4" poster="${j.id}-${i}.jpg" controls muted loop playsinline preload="none"></video><p>${i + 1}/${clips.length}</p></div>`).join('');
-  fs.writeFileSync(path.join(VDIR, j.id + '.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>19號舖子 輪播預覽</title><style>body{margin:0;background:#FDF1EC;font-family:sans-serif}h1{font-size:18px;padding:12px 16px;margin:0;color:#4A3530}.r{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 16px 16px}.c{flex:0 0 82%;scroll-snap-align:center}video{width:100%;border-radius:16px;background:#fff;aspect-ratio:3/4}p{text-align:center;color:#8A7268;margin:4px}pre{white-space:pre-wrap;padding:0 16px 32px;color:#4A3530;font-size:15px}</style><h1>${(j.title || '') + ' ' + (j.title2 || '')}（左右滑）</h1><div class="r">${vids}</div><pre>${String(j.caption || '').replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</pre>`);
+  const vids = clips.map((_, i) => `<div class="c"><video src="${j.id}-${i}.mp4" poster="${j.id}-${i}.jpg" controls loop playsinline preload="none"></video><p>${i + 1}/${clips.length}</p></div>`).join('');
+  fs.writeFileSync(path.join(VDIR, j.id + '.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>19號舖子 輪播預覽</title><style>body{margin:0;background:#FDF1EC;font-family:sans-serif}h1{font-size:18px;padding:12px 16px;margin:0;color:#4A3530}.r{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 16px 16px}.c{flex:0 0 82%;scroll-snap-align:center}video{width:100%;border-radius:16px;background:#fff;aspect-ratio:4/5}p{text-align:center;color:#8A7268;margin:4px}pre{white-space:pre-wrap;padding:0 16px 32px;color:#4A3530;font-size:15px}</style><h1>${(j.title || '') + ' ' + (j.title2 || '')}（左右滑）</h1><div class="r">${vids}</div><pre>${String(j.caption || '').replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</pre>`);
 }
 
 /* ---------- v8：單品輪播（封面 C：場景＋人物去背＋商品貼紙；後面每張照片滿版 A） ---------- */
