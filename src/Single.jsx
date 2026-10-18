@@ -5,7 +5,7 @@ import { AbsoluteFill, Img, interpolate, spring, useCurrentFrame, useVideoConfig
 //   A＝照片滿版　B＝滿版模糊背景＋正方形從躺著立起來　C＝封面：人物去背＋商品貼紙
 //   顏色跟著商品變：h1＝商品主色、h2＝商品副色（palette.py 算的）
 export const SW = 1080, SH = 1440;
-export const LEN = { hook: 120, point: 100, cta: 120 };
+export const LEN = { hook: 120, point: 100, scene: 115, cta: 120 };
 const FONT = '"Noto Sans CJK TC","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif';
 const src = (s) => (!s ? staticFile('logo.png') : /^https?:/.test(s) ? s : staticFile(s));
 const hsl = (h, s, l, a = 1) => `hsla(${Math.round(h)},${s}%,${l}%,${a})`;
@@ -32,16 +32,43 @@ const Sparkles = ({ t }) => {
 };
 
 /** 大標：一字一字彈上來（白字＋商品色粗描邊＋深色落影） */
-const PopTitle = ({ text, t, start = 8, size = 100 }) => {
+/** v9：標題自動縮字，一行放得下就一行；太長才平均分兩行（不會剩一個字） */
+const cw = (ch) => (/[\u0000-\u00ff]/.test(ch) ? 0.62 : /\p{Extended_Pictographic}/u.test(ch) ? 1.25 : 1.0);
+export const fitTitle = (text, maxW, maxSize, minSize) => {
+  const chars = Array.from(String(text || ''));
+  const units = (a) => a.reduce((s, c) => s + cw(c), 0) * 1.06 + a.length * 0.03;
+  const one = Math.floor(maxW / Math.max(1, units(chars)));
+  if (one >= minSize || chars.length < 6) return { size: Math.min(maxSize, Math.max(one, 40)), lines: [chars] };
+  // 兩行：找最平均的斷點，優先在標點、空白後面斷
+  let best = null;
+  for (let k = 2; k <= chars.length - 2; k++) {
+    const a = chars.slice(0, k), b = chars.slice(k);
+    const w = Math.max(units(a), units(b));
+    const punct = /[，,、。！!？?～~ ｜|]/.test(chars[k - 1]) ? -0.8 : 0;
+    const score = w + punct;
+    if (!best || score < best.score) best = { score, a, b, w };
+  }
+  const a = best.a.filter((c, i) => !(i === best.a.length - 1 && /[ ｜|]/.test(c)));
+  return { size: Math.min(maxSize, Math.floor(maxW / best.w)), lines: [a, best.b] };
+};
+const PopTitle = ({ text, t, start = 8, size = 100, maxW = 960, minSize }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const fit = fitTitle(text, maxW, size, minSize || Math.round(size * 0.72));
+  const sz = fit.size;
+  let idx = 0;
   return (
-    <div style={{ fontSize: size, fontWeight: 900, lineHeight: 1.16, letterSpacing: 2, textAlign: 'center' }}>
-      {Array.from(text).map((ch, i) => {
-        const p = spring({ frame: f - start - i * 1.6, fps, config: { damping: 9, stiffness: 180, mass: 0.6 } });
-        return <span key={i} style={{ display: 'inline-block', color: '#fff', WebkitTextStroke: `${Math.round(size / 7)}px ${t.stroke}`, paintOrder: 'stroke fill', textShadow: `0 ${size / 12}px 0 ${t.shadow}`,
-          transform: `translateY(${(1 - p) * 60}px) scale(${0.4 + p * 0.6}) rotate(${(1 - p) * (i % 2 ? 12 : -12)}deg)`, opacity: Math.min(1, p * 1.5), whiteSpace: 'pre' }}>{ch}</span>;
-      })}
+    <div style={{ fontSize: sz, fontWeight: 900, lineHeight: 1.16, letterSpacing: 2, textAlign: 'center' }}>
+      {fit.lines.map((line, li) => (
+        <div key={li} style={{ whiteSpace: 'nowrap' }}>
+          {line.map((ch) => {
+            const i = idx++;
+            const p = spring({ frame: f - start - i * 1.6, fps, config: { damping: 9, stiffness: 180, mass: 0.6 } });
+            return <span key={i} style={{ display: 'inline-block', color: '#fff', WebkitTextStroke: `${Math.round(sz / 7)}px ${t.stroke}`, paintOrder: 'stroke fill', textShadow: `0 ${sz / 12}px 0 ${t.shadow}`,
+              transform: `translateY(${(1 - p) * 60}px) scale(${0.4 + p * 0.6}) rotate(${(1 - p) * (i % 2 ? 12 : -12)}deg)`, opacity: Math.min(1, p * 1.5), whiteSpace: 'pre' }}>{ch}</span>;
+          })}
+        </div>
+      ))}
     </div>
   );
 };
@@ -124,13 +151,13 @@ const Words = ({ mode, title, sub, point, t, i, n, bottom = 170, big = 104 }) =>
         ) : null}
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
           {mode !== 'point' ? <Sparkle size={56} color={t.badge} style={{ transform: `rotate(${f * 3}deg) scale(${0.85 + Math.sin(f / 5) * 0.15})` }} /> : null}
-          <PopTitle text={title} t={t} size={mode === 'point' ? (long > 10 ? 68 : 80) : (long > 12 ? 84 : big)} start={mode === 'point' ? 6 : 8} />
+          <PopTitle text={title} t={t} size={mode === 'point' ? 88 : big} maxW={mode === 'point' ? 960 : 900} minSize={mode === 'point' ? 64 : 76} start={mode === 'point' ? 6 : 8} />
         </div>
         {sub ? <div style={{ marginTop: 24 }}><Ribbon text={sub} t={t} start={mode === 'point' ? 18 : 24} size={sub.length > 16 ? 40 : 46} /></div> : null}
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 52, textAlign: 'center', opacity: hint, transform: `translateY(${(1 - hint) * 30}px)` }}>
         <span style={{ display: 'inline-block', padding: '12px 34px', borderRadius: 40, background: 'rgba(255,255,255,.95)', color: t.stroke, fontSize: 34, fontWeight: 900 }}>
-          {mode === 'cta' ? '💬 截圖私訊官方 LINE 問價・下單' : mode === 'hook' ? <>往右滑看細節 <span style={{ display: 'inline-block', transform: `translateX(${Math.sin(f / 5) * 10}px)` }}>👉</span></> : `${i + 1} / ${n}`}
+          {mode === 'cta' ? '💬 截圖私訊官方 LINE 問價・下單' : mode === 'hook' ? <>細節看下去 <span style={{ display: 'inline-block', transform: `translateY(${Math.sin(f / 5) * 6}px)` }}>👀</span></> : `${i + 1} / ${n}`}
         </span>
       </div>
       <Watermark />
@@ -167,7 +194,7 @@ export const SlideA = ({ img, mode = 'hook', title = '', sub = '', stamp = true,
       ) : null}
       <Sparkles t={t} />
       <TopBar tag={tag} t={t} />
-      {stamp && mode !== 'point' ? <Stamp t={t} /> : null}
+      {stamp && (mode === 'hook' || mode === 'cta') ? <Stamp t={t} /> : null}
       <Words mode={mode} title={title} sub={sub} point={point} t={t} i={i} n={n} />
     </AbsoluteFill>
   );
