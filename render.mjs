@@ -178,6 +178,23 @@ function frameIt(src, out, W, H, fgW, fgH, bgm, at, len, fadeIn, fgY) {
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', '30', '-movflags', '+faststart', '-t', (len > 0 ? len : dur(src) || 60).toFixed(3), out);
   ff(args);
 }
+/** v96：封面停格 T 秒，再 0.3 秒淡入原本的動畫（只動畫面，聲音之後統一配） */
+function holdCover(raw, still, T, w, h) {
+  const tmp = raw.replace(/\.raw\.mp4$/, '.hold.mp4');
+  const X = 0.3;
+  ff(['-loop', '1', '-t', String(T + X), '-i', still, '-i', raw, '-filter_complex',
+    `[0:v]scale=${w}:${h},fps=30,format=yuv420p,setsar=1[a];[1:v]fps=30,format=yuv420p,setsar=1[b];[a][b]xfade=transition=fade:duration=${X}:offset=${T}[v]`,
+    '-map', '[v]', '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-r', '30', tmp]);
+  fs.renameSync(tmp, raw);
+}
+/** v96：封面圖：<編號>-cover.jpg（9:16，Reels／FB 縮圖）、<編號>-cover45.jpg（4:5，IG 輪播第一張） */
+function coverImages(id, still) {
+  const mk = (W, H, fgW, fgH, y, out) => ff(['-i', still, '-filter_complex',
+    `[0:v]split[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=40:2,eq=brightness=-0.04:saturation=1.1[bg];[b]scale=${fgW}:${fgH}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:${y}`,
+    '-frames:v', '1', '-q:v', '2', path.join(VDIR, out)]);
+  mk(1080, 1920, 1000, 1400, 230, `${id}-cover.jpg`);
+  mk(1080, 1350, 1080, 1350, '(H-h)/2', `${id}-cover45.jpg`);
+}
 async function renderClips(j, serveUrl, clips) {
   const bgm = bgmFor(j.id);
   let at = 0;
@@ -187,7 +204,11 @@ async function renderClips(j, serveUrl, clips) {
     const c = clips[i];
     const composition = await selectComposition({ serveUrl, id: c.id, inputProps: c.props, browserExecutable: process.env.BROWSER || null });
     if (!fs.existsSync(raw)) await renderMedia({ composition, serveUrl, codec: 'h264', outputLocation: raw, inputProps: c.props, concurrency: 2, crf: 18, pixelFormat: 'yuv420p', enforceAudioTrack: true, browserExecutable: process.env.BROWSER || null });
-    await renderStill({ composition, serveUrl, output: path.join(VDIR, `${j.id}-${i}.jpg`), inputProps: c.props, frame: c.id === 'Thanks' ? 50 : c.id === 'LiveGrid' ? 110 : 80, imageFormat: 'jpeg', jpegQuality: 88, browserExecutable: process.env.BROWSER || null });
+    const still = path.join(VDIR, `${j.id}-${i}.jpg`);
+    await renderStill({ composition, serveUrl, output: still, inputProps: c.props, frame: Math.min(composition.durationInFrames - 1, c.id === 'Thanks' ? 50 : c.id === 'LiveGrid' ? 110 : 80), imageFormat: 'jpeg', jpegQuality: 92, browserExecutable: process.env.BROWSER || null });
+    // v96：每支影片第一格就是完整清楚的封面（IG／FB 縮圖不會再霧霧的）→ 封面停一下再淡入動畫
+    if (!fs.existsSync(raw + '.c')) { try { holdCover(raw, still, i === 0 ? 1.2 : 0.5, composition.width, composition.height); fs.writeFileSync(raw + '.c', '1'); } catch (e) { console.log('封面停格失敗', e.message); } }
+    if (i === 0) { try { coverImages(j.id, still); } catch (e) { console.log('封面圖失敗', e.message); } }
     const len = dur(raw);
     frameIt(raw, out + '.tmp.mp4', 1080, 1350, 1080, 1350, bgm, at, len, i === 0 ? 0.3 : 0.12);
     fs.renameSync(out + '.tmp.mp4', out);
@@ -206,7 +227,7 @@ async function renderClips(j, serveUrl, clips) {
     } catch (e) { console.error('⚠️ 完整影片接不起來', e.message); }
     for (const f of [list, cat]) try { fs.unlinkSync(f); } catch (e) {}
   }
-  if (fs.existsSync(full)) for (let i = 0; i < clips.length; i++) try { fs.unlinkSync(clipPath(j.id, i).replace(/\.mp4$/, '.raw.mp4')); } catch (e) {}
+  if (fs.existsSync(full)) for (let i = 0; i < clips.length; i++) { const rw = clipPath(j.id, i).replace(/\.mp4$/, '.raw.mp4'); for (const f of [rw, rw + '.c']) try { fs.unlinkSync(f); } catch (e) {} }
   // 預覽頁（19號小幫手的「▶️ 看輪播」）
   const vids = clips.map((_, i) => `<div class="c"><video src="${j.id}-${i}.mp4" poster="${j.id}-${i}.jpg" controls loop playsinline preload="none"></video><p>${i + 1}/${clips.length}</p></div>`).join('');
   fs.writeFileSync(path.join(VDIR, j.id + '.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>19號舖子 輪播預覽</title><style>body{margin:0;background:#FDF1EC;font-family:sans-serif}h1{font-size:18px;padding:12px 16px;margin:0;color:#4A3530}.r{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 16px 16px}.c{flex:0 0 82%;scroll-snap-align:center}video{width:100%;border-radius:16px;background:#fff;aspect-ratio:4/5}p{text-align:center;color:#8A7268;margin:4px}pre{white-space:pre-wrap;padding:0 16px 32px;color:#4A3530;font-size:15px}</style><h1>${(j.title || '') + ' ' + (j.title2 || '')}（左右滑）</h1><div class="r">${vids}</div><pre>${String(j.caption || '').replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</pre>`);
