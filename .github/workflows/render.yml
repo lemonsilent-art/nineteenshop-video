@@ -34,7 +34,7 @@ jobs:
           cache: npm
       - name: 安裝中文字型
         if: steps.check.outputs.n != '0'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk fonts-noto-color-emoji ffmpeg
       - uses: actions/setup-python@v5
         if: steps.check.outputs.n != '0'
         with:
