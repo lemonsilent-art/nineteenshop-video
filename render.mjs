@@ -12,6 +12,33 @@ const cfg = JSON.parse(fs.readFileSync('config.json', 'utf8'));
 const SITE = path.resolve('site');
 const VDIR = path.join(SITE, 'v');
 fs.mkdirSync(VDIR, { recursive: true });
+// Pixabay 免版權音樂（Pixabay Content License：可商用、不用標示）；第一次用時下載到 public/bgm
+const BGM_URLS = [
+  'https://cdn.pixabay.com/download/audio/2025/03/03/audio_dd229d9ddd.mp3',   // Fashion Pop - Kulakovka
+  'https://cdn.pixabay.com/download/audio/2026/07/06/audio_cbe1a27af7.mp3',   // Fashion Pop - JonasBlakewood
+  'https://cdn.pixabay.com/download/audio/2025/09/29/audio_77a36612dd.mp3',   // Escape Your Love - FASSounds
+  'https://cdn.pixabay.com/download/audio/2025/02/09/audio_a9cb3e9786.mp3',   // Summer Pop - Kulakovka
+  'https://cdn.pixabay.com/download/audio/2026/10/01/audio_d0a162bffd.mp3',   // Cute Lofi - ZephiraMusic
+  'https://cdn.pixabay.com/download/audio/2026/08/14/audio_a5f2abd4d3.mp3',   // Chill Lofi - ZephiraMusic
+  'https://cdn.pixabay.com/download/audio/2026/09/28/audio_e5f88d6b9d.mp3',   // Vlog - No-Copyright-Music-2026
+];
+async function getBgms() {
+fs.mkdirSync(path.resolve('public', 'bgm'), { recursive: true });
+for (const u of BGM_URLS) {
+  const f = path.resolve('public', 'bgm', 'px_' + path.basename(u));
+  if (fs.existsSync(f)) continue;
+  try {
+    const r = await fetch(u, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130 Safari/537.36', Referer: 'https://pixabay.com/' } });
+    const b = Buffer.from(await r.arrayBuffer());
+    if (r.ok && b.length > 100000) fs.writeFileSync(f, b); else console.log('音樂下載失敗', r.status, b.length, u);
+  } catch (e) { console.log('音樂下載失敗', e.message, u); }
+}
+}
+let BGMS = [];
+const listBgms = () => { try { return fs.readdirSync(path.resolve('public', 'bgm')).filter((f) => /\.(mp3|m4a)$/i.test(f)).sort().map((f) => path.resolve('public', 'bgm', f)); } catch (e) { return []; } };   // 免版權配樂放 public/bgm（沒有就無聲；IG Reels 另外掛 IG 熱門音樂）
+const bgmFor = (id) => BGMS.length ? BGMS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % BGMS.length] : null;
+const ff = (args) => { try { execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }); } catch (e) { execFileSync('npx', ['remotion', 'ffmpeg', '-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }); } };
+const dur = (f) => { try { return parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f], { encoding: 'utf8' })) || 0; } catch (e) { return 0; } };
 const idxFile = path.join(SITE, 'index.json');
 let idx = {};
 try { idx = JSON.parse(fs.readFileSync(idxFile, 'utf8')); } catch (e) {}
@@ -56,6 +83,7 @@ if (jobs.length) {
   for (const j of jobs.filter((x) => x.kind === 'single' || x.kind === 'live')) {
     try { j._clips = j.kind === 'single' ? await prepareSingle(j, pub) : await prepareLive(j, pub); } catch (e) { console.log('❌ 準備失敗', j.id, e.message); }
   }
+  await getBgms(); BGMS = listBgms(); console.log('配樂：' + BGMS.length + ' 首');
   const serveUrl = await bundle({ entryPoint: path.resolve('src/index.js') });
   // v7：一天的新品輪播（封面＋商品頁＋感謝卡）
   for (const j of jobs.filter((x) => x.kind === 'set' && x._prep)) {
@@ -138,10 +166,6 @@ async function renderSet(j, serveUrl, prep) {
 }
 /* v9：IG 輪播只收 4:5～16:9 → 每支小影片轉成 1080×1350（左右用模糊底補滿）＋背景音樂；
    FB／IG Reels 完整版做成 9:16（1080×1920，上下模糊底），限動不會切到字 */
-const BGMS = (() => { try { return fs.readdirSync(path.resolve('public', 'bgm')).filter((f) => /\.(mp3|m4a)$/i.test(f)).sort().map((f) => path.resolve('public', 'bgm', f)); } catch (e) { return []; } })();   // 免版權配樂放 public/bgm（沒有就無聲；IG Reels 另外掛 IG 熱門音樂）
-const bgmFor = (id) => BGMS.length ? BGMS[[...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0) % BGMS.length] : null;
-const ff = (args) => { try { execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }); } catch (e) { execFileSync('npx', ['remotion', 'ffmpeg', '-y', '-loglevel', 'error', ...args], { stdio: 'inherit' }); } };
-const dur = (f) => { try { return parseFloat(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f], { encoding: 'utf8' })) || 0; } catch (e) { return 0; } };
 function frameIt(src, out, W, H, fgW, fgH, bgm, at, len, fadeIn, fgY) {
   const vf = `[0:v]split[a][b];[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=40:2,eq=brightness=-0.04:saturation=1.1[bg];` +
     `[b]scale=${fgW}:${fgH}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:${fgY == null ? '(H-h)/2' : fgY},setsar=1,format=yuv420p[v]`;
