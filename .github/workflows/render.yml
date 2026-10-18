@@ -27,6 +27,16 @@ jobs:
           N=$(curl -sL "$(node -p "require('./config.json').API_URL")?action=videojobs" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s).jobs||[];const fs=require('fs');console.log(j.filter(x=>{const n=x.kind==='set'?Math.min(10,(x.slides||[]).length+2):Math.min(10,(x.slides||[]).length);return Array.from({length:n}).some((_,i)=>!fs.existsSync('site/v/'+x.id+'-'+i+'.mp4'))}).length)}catch(e){console.log(0)}})")
           echo "n=$N" >> $GITHUB_OUTPUT
           echo "待製作：$N"
+      - name: 社團拼圖封面（v97）
+        id: collage
+        run: |
+          N=$(python3 collage.py --check || echo 0)
+          echo "n=$N" >> $GITHUB_OUTPUT
+          if [ "$N" != "0" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+            pip install -q pillow
+            python3 collage.py || true
+          fi
       - uses: actions/setup-node@v4
         if: steps.check.outputs.n != '0'
         with:
@@ -55,7 +65,7 @@ jobs:
         if: steps.check.outputs.n != '0'
         run: node render.mjs
       - name: 放上 GitHub Pages
-        if: steps.check.outputs.n != '0' || github.event_name == 'workflow_dispatch'
+        if: steps.check.outputs.n != '0' || steps.collage.outputs.n != '0' || github.event_name == 'workflow_dispatch'
         run: |
           mkdir -p site && touch site/.nojekyll
           [ -f site/index.html ] || echo '<meta charset="utf-8"><p>19號舖子 IG 影片暫存區</p>' > site/index.html
