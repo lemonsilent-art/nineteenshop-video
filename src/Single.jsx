@@ -83,7 +83,8 @@ const Ribbon = ({ text, t, start = 24, size = 46 }) => {
   );
 };
 /** 價格印章（v8：不露價格）：星星章蓋下來，中間「$ ? ? ?」一個一個跳，下面「LINE 問價」 */
-const Stamp = ({ t, start = 34, top = 150, right = 46, size = 230, price = '' }) => {
+/* v114：價格印章延到第 2.5 秒才蓋下來（30fps × 2.5 = 75），前面先讓商品細節留住人 */
+const Stamp = ({ t, start = 75, top = 150, right = 46, size = 230, price = '' }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = spring({ frame: f - start, fps, config: { damping: 10, stiffness: 140 } });
