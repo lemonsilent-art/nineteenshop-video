@@ -260,8 +260,8 @@ async function prepareSingle(j, pub) {
   const tag = j.tag || '';
   const n = slides.length;
   return slides.map((s, i) => i === 0
-    ? { id: 'CoverC', props: { scene: s.local, person: personCut, cut: prodCut, title: s.title || '', sub: s.sub || '', tag, h1, h2 } }
-    : { id: 'SlideA', props: { img: s.local, mode: s.mode || 'point', title: s.title || '', sub: s.sub || '', point: s.point || i, i, n, tag, h1, h2, cut: s.mode === 'cta' ? prodCut : undefined } });
+    ? { id: 'CoverC', props: { scene: s.local, person: personCut, cut: prodCut, title: s.title || '', sub: s.sub || '', tag, h1, h2, price: j.priceFrom || '' } }
+    : { id: 'SlideA', props: { img: s.local, mode: s.mode || 'point', title: s.title || '', sub: s.sub || '', point: s.point || i, i, n, tag, h1, h2, price: s.mode === 'cta' ? (j.priceFrom || '') : '', cut: s.mode === 'cta' ? prodCut : undefined } });
 }
 /* ---------- v8：連線合輯（每個國家：大圖一頁＋九宮格） ---------- */
 async function prepareLive(j, pub) {
