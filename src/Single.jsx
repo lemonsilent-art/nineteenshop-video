@@ -83,7 +83,7 @@ const Ribbon = ({ text, t, start = 24, size = 46 }) => {
   );
 };
 /** 價格印章（v8：不露價格）：星星章蓋下來，中間「$ ? ? ?」一個一個跳，下面「LINE 問價」 */
-const Stamp = ({ t, start = 34, top = 150, right = 46, size = 230 }) => {
+const Stamp = ({ t, start = 34, top = 150, right = 46, size = 230, price = '' }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const p = spring({ frame: f - start, fps, config: { damping: 10, stiffness: 140 } });
@@ -98,6 +98,11 @@ const Stamp = ({ t, start = 34, top = 150, right = 46, size = 230 }) => {
         <rect x={-40 + shine * 180} y="-10" width="14" height="120" fill="rgba(255,255,255,.35)" transform="rotate(25 50 50)" clipPath="url(#stc)" />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: t.stampText, fontWeight: 900 }}>
+        {price ? (<>
+        <div style={{ fontSize: size * 0.11, letterSpacing: 2 }}>NT$</div>
+        <div style={{ fontSize: size * (String(price).length > 4 ? 0.2 : 0.25), lineHeight: 1 }}>{price}</div>
+        <div style={{ marginTop: size * 0.02, padding: `${size * 0.012}px ${size * 0.05}px`, borderRadius: 30, background: '#fff', color: t.stamp, fontSize: size * 0.085, letterSpacing: 1 }}>起</div>
+        </>) : (<>
         <div style={{ fontSize: size * 0.12, letterSpacing: 3 }}>神秘價</div>
         <div style={{ fontSize: size * 0.27, lineHeight: 1, display: 'flex', alignItems: 'baseline' }}>
           <span style={{ fontSize: size * 0.2, marginRight: 2 }}>$</span>
@@ -107,6 +112,7 @@ const Stamp = ({ t, start = 34, top = 150, right = 46, size = 230 }) => {
           })}
         </div>
         <div style={{ marginTop: size * 0.02, padding: `${size * 0.012}px ${size * 0.05}px`, borderRadius: 30, background: '#fff', color: t.stamp, fontSize: size * 0.085, letterSpacing: 1 }}>LINE 問價</div>
+        </>)}
       </div>
     </div>
   );
@@ -157,10 +163,10 @@ const Words = ({ mode, title, sub, point, t, i, n, bottom = 170, big = 104 }) =>
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 52, textAlign: 'center', opacity: hint, transform: `translateY(${(1 - hint) * 30}px)` }}>
         <span style={{ display: 'inline-block', padding: '12px 34px', borderRadius: 40, background: 'rgba(255,255,255,.95)', color: t.stroke, fontSize: 34, fontWeight: 900 }}>
-          {mode === 'cta' ? '💬 截圖私訊官方 LINE 問價・下單' : mode === 'hook' ? <>細節看下去 <span style={{ display: 'inline-block', transform: `translateY(${Math.sin(f / 5) * 6}px)` }}>👀</span></> : `${i + 1} / ${n}`}
+          {mode === 'cta' ? '📲 截圖到官方 LINE 下單' : mode === 'scene' ? '情境示意（實品以照片為準）' : mode === 'hook' ? <>細節看下去 <span style={{ display: 'inline-block', transform: `translateY(${Math.sin(f / 5) * 6}px)` }}>👀</span></> : `${i + 1} / ${n}`}
         </span>
       </div>
-      <Watermark />
+      {null /* v113：拿掉飄浮浮水印，左上角固定 Logo 即可 */}
     </>
   );
 };
@@ -168,7 +174,7 @@ const len = (mode) => LEN[mode] || 100;
 const Shade = () => <AbsoluteFill style={{ background: 'linear-gradient(0deg, rgba(30,16,14,.8) 0%, rgba(30,16,14,.45) 28%, rgba(30,16,14,0) 48%), linear-gradient(180deg, rgba(30,16,14,.35) 0%, rgba(30,16,14,0) 16%)' }} />;
 
 /* ---------- A：照片滿版 ---------- */
-export const SlideA = ({ img, mode = 'hook', title = '', sub = '', stamp = true, tag = '', point = 1, i = 0, n = 1, h1, h2, cut }) => {
+export const SlideA = ({ img, mode = 'hook', title = '', sub = '', stamp = true, tag = '', point = 1, i = 0, n = 1, h1, h2, cut, price = '' }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = theme(h1, h2), L = len(mode);
@@ -194,14 +200,14 @@ export const SlideA = ({ img, mode = 'hook', title = '', sub = '', stamp = true,
       ) : null}
       <Sparkles t={t} />
       <TopBar tag={tag} t={t} />
-      {stamp && (mode === 'hook' || mode === 'cta') ? <Stamp t={t} /> : null}
+      {stamp && (mode === 'hook' || mode === 'cta') ? <Stamp t={t} price={price} /> : null}
       <Words mode={mode} title={title} sub={sub} point={point} t={t} i={i} n={n} />
     </AbsoluteFill>
   );
 };
 
 /* ---------- B：滿版模糊背景＋正方形從「平躺」立起來 ---------- */
-export const SlideB = ({ img, mode = 'hook', title = '', sub = '', stamp = true, tag = '', point = 1, i = 0, n = 1, h1, h2, cut }) => {
+export const SlideB = ({ img, mode = 'hook', title = '', sub = '', stamp = true, tag = '', point = 1, i = 0, n = 1, h1, h2, cut, price = '' }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = theme(h1, h2), L = len(mode);
@@ -231,14 +237,14 @@ export const SlideB = ({ img, mode = 'hook', title = '', sub = '', stamp = true,
         </div>
       </div>
       <TopBar tag={tag} t={t} />
-      {stamp && mode !== 'point' ? <Stamp t={t} top={110} right={30} size={210} /> : null}
+      {stamp && mode !== 'point' ? <Stamp t={t} top={110} right={30} size={210} price={price} /> : null}
       <Words mode={mode} title={title} sub={sub} point={point} t={t} i={i} n={n} bottom={150} big={92} />
     </AbsoluteFill>
   );
 };
 
 /* ---------- C：封面＝人物場景滿版＋人物去背浮出來＋商品去背貼紙飛進她手邊 ---------- */
-export const CoverC = ({ scene, person, cut, title = '', sub = '', stamp = true, tag = '', h1, h2 }) => {
+export const CoverC = ({ scene, person, cut, title = '', sub = '', stamp = true, tag = '', h1, h2, price = '' }) => {
   const f = useCurrentFrame();
   const { fps } = useVideoConfig();
   const t = theme(h1, h2);
@@ -265,7 +271,7 @@ export const CoverC = ({ scene, person, cut, title = '', sub = '', stamp = true,
       </div>
       <Shade />
       <TopBar tag={tag} t={t} />
-      {stamp ? <Stamp t={t} top={140} right={40} /> : null}
+      {stamp ? <Stamp t={t} top={140} right={40} price={price} /> : null}
       <Words mode="hook" title={title} sub={sub} t={t} i={0} n={1} />
     </AbsoluteFill>
   );
@@ -313,7 +319,7 @@ export const LiveHero = ({ img, name = '', country = '', flag = '', city = '', c
         <div style={{ marginTop: 26 }}><Ribbon text="現場連線・買到才算數" t={t} size={44} /></div>
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 60, textAlign: 'center' }}><Countdown close={close} t={t} /></div>
-      <Watermark />
+      {null /* v113：拿掉飄浮浮水印，左上角固定 Logo 即可 */}
     </AbsoluteFill>
   );
 };
@@ -346,7 +352,7 @@ export const LiveGrid = ({ items = [], country = '', flag = '', page = 1, pages 
         <span style={{ display: 'inline-block', padding: '12px 34px', borderRadius: 40, background: '#fff', color: t.stroke, fontSize: 34, fontWeight: 900, boxShadow: `0 6px 0 ${t.shadow}` }}>💬 截圖「#編號」私訊官方 LINE 問價</span>
       </div>
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 40, textAlign: 'center' }}><Countdown close={close} t={t} /></div>
-      <Watermark />
+      {null /* v113：拿掉飄浮浮水印，左上角固定 Logo 即可 */}
     </AbsoluteFill>
   );
 };
