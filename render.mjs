@@ -210,7 +210,8 @@ async function renderClips(j, serveUrl, clips) {
     if (!fs.existsSync(raw + '.c')) { try { holdCover(raw, still, i === 0 ? 1.2 : 0.5, composition.width, composition.height); fs.writeFileSync(raw + '.c', '1'); } catch (e) { console.log('封面停格失敗', e.message); } }
     if (i === 0) { try { coverImages(j.id, still); } catch (e) { console.log('封面圖失敗', e.message); } }
     const len = dur(raw);
-    frameIt(raw, out + '.tmp.mp4', 1080, 1350, 1080, 1350, bgm, at, len, i === 0 ? 0.3 : 0.12);
+    // v119：IG 輪播每支小影片改成「無聲音軌」→ 左右滑不會每張各自從頭放一段音樂、聽起來斷斷續續；完整版（Reels／FB）才配樂
+    frameIt(raw, out + '.tmp.mp4', 1080, 1350, 1080, 1350, null, at, len, i === 0 ? 0.3 : 0.12);
     fs.renameSync(out + '.tmp.mp4', out);
     at += len;
   }
